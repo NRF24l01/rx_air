@@ -7,4 +7,4 @@
 *желательно* поставить понижайку импульсную для питания esp отдельно от моторов
 
 # Схема сборки
-<фото>
+![схема](https://raw.githubusercontent.com/NRF24l01/rx_air/refs/heads/main/docs/scheme_bb.png)
