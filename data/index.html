@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Spray Scheduler</title>
+  <script defer>
+    let intervals = [];
+    let originalIntervals = "[]";
+    let cooldownConfigured = 0;
+    let cooldownRemaining = 0;
+
+    async function fetchSchedule() {
+      const res = await fetch("/api/schedule");
+      const data = await res.json();
+      intervals = data.schedule;
+      originalIntervals = JSON.stringify(intervals);
+      renderIntervals();
+    }
+
+    async function fetchCooldown() {
+      const res = await fetch("/api/cooldown");
+      if (!res.ok) return;
+      const data = await res.json();
+      cooldownConfigured = data.configured;
+      cooldownRemaining = data.remaining;
+      document.getElementById("cooldownDisplay").textContent = `${cooldownRemaining}s / ${cooldownConfigured}s`;
+    }
+
+    async function fetchLastActivation() {
+      const res = await fetch("/api/last_activation");
+      if (!res.ok) return;
+      const data = await res.json();
+      document.getElementById("lastActivation").textContent = data.time || "--:--";
+    }
+
+    async function updateCooldownConfigured(value) {
+      cooldownConfigured = value;
+      const res = await fetch("/api/cooldown", {
+        method: "POST",
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ configured: value })
+      });
+      if (!res.ok) alert("Ошибка сохранения кулдауна");
+      else fetchCooldown();
+    }
+
+    async function saveSchedule() {
+      const res = await fetch("/api/schedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ schedule: intervals })
+      });
+      if (res.ok) {
+        originalIntervals = JSON.stringify(intervals);
+        showSaveButton(false);
+        alert("✅ Расписание сохранено");
+      } else {
+        alert("❌ Ошибка сохранения");
+      }
+    }
+
+    async function activateSpray() {
+      const res = await fetch("/api/activate", { method: "POST" });
+      if (res.ok) {
+        alert("💨 Пшик выполнен!");
+        fetchLastActivation();
+        fetchCooldown();
+      } else {
+        alert("⛔ Пшик недоступен");
+      }
+    }
+
+    function showSaveButton(show) {
+      document.getElementById("saveBtn").classList.toggle("hidden", !show);
+    }
+
+    function checkChanges() {
+      const current = JSON.stringify(intervals);
+      showSaveButton(current !== originalIntervals);
+    }
+
+    function addInterval() {
+      intervals.push({ start: "", end: "", cooldown: 0, duration: 1, days: [] });
+      renderIntervals();
+      checkChanges();
+    }
+
+    function deleteInterval(idx) {
+      intervals.splice(idx, 1);
+      renderIntervals();
+      checkChanges();
+    }
+
+    function updateTimeValue(idx, field, value) {
+      if (field === 'end' && intervals[idx].start && value < intervals[idx].start) {
+        alert("⛔ Время окончания не может быть раньше начала");
+        renderIntervals();
+        return;
+      }
+      if (field === 'start' && intervals[idx].end && value > intervals[idx].end) {
+        alert("⛔ Время начала не может быть позже окончания");
+        renderIntervals();
+        return;
+      }
+      intervals[idx][field] = value;
+      document.getElementById(`interval-header-${idx}`).textContent = formatIntervalHeader(idx);
+      checkChanges();
+    }
+
+    function toggleInterval(el, idx) {
+      const next = el.nextElementSibling;
+      next.classList.toggle("hidden");
+      const svg = el.querySelector("svg");
+      svg.classList.toggle("rotate-180");
+    }
+
+    function toggleDay(btn, idx) {
+      const day = btn.textContent;
+      const days = intervals[idx].days;
+      const i = days.indexOf(day);
+      if (i >= 0) days.splice(i, 1);
+      else days.push(day);
+      renderIntervals();
+      checkChanges();
+    }
+
+    function formatIntervalHeader(idx) {
+      const it = intervals[idx];
+      const days = it.days.join(", ");
+      return `${days ? days + " " : ""}${it.start || "--:--"} → ${it.end || "--:--"}`;
+    }
+
+    function updateTime() {
+      const now = new Date();
+      document.getElementById("currentTime").textContent = now.toLocaleTimeString("ru-RU");
+      document.getElementById("currentDate").textContent = now.toLocaleDateString("ru-RU", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+    }
+
+    function renderIntervals() {
+      const container = document.getElementById("intervals");
+      container.innerHTML = "";
+      intervals.forEach((interval, idx) => {
+        const block = document.createElement("div");
+        block.className = "rounded-xl border border-gray-200 overflow-hidden bg-gray-50";
+        block.innerHTML = `
+          <div class="flex items-center justify-between px-4 py-3 bg-gray-100 hover:bg-gray-200 cursor-pointer font-medium transition" onclick="toggleInterval(this, ${idx})">
+            <span id="interval-header-${idx}" class="flex-1 text-left">${formatIntervalHeader(idx)}</span>
+            <svg class="w-5 h-5 transform transition-transform" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7" /></svg>
+          </div>
+          <div class="hidden px-4 py-4 bg-white space-y-4">
+            <label class="block text-sm">Начало:
+              <input type="time" value="${interval.start}" onchange="updateTimeValue(${idx}, 'start', this.value)" class="w-full p-2 mt-1 border border-gray-300 rounded-lg">
+            </label>
+            <label class="block text-sm">Конец:
+              <input type="time" value="${interval.end}" onchange="updateTimeValue(${idx}, 'end', this.value)" class="w-full p-2 mt-1 border border-gray-300 rounded-lg">
+            </label>
+            <label class="block text-sm">Кулдаун (сек):
+              <input type="number" value="${interval.cooldown}" onchange="updateTimeValue(${idx}, 'cooldown', parseInt(this.value))" class="w-full p-2 mt-1 border border-gray-300 rounded-lg">
+            </label>
+            <label class="block text-sm">Время пшика (сек):
+              <input type="number" value="${interval.duration}" onchange="updateTimeValue(${idx}, 'duration', parseInt(this.value))" class="w-full p-2 mt-1 border border-gray-300 rounded-lg">
+            </label>
+            <div class="text-sm font-medium">Дни недели:</div>
+            <div class="flex justify-between bg-gray-200 p-1 rounded-lg">
+              ${["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"].map((d, i, arr) =>
+                `<button class="flex-1 py-1 text-sm text-gray-700 transition ${interval.days.includes(d) ? 'bg-blue-200' : ''} ${i === 0 ? 'rounded-l-lg' : ''} ${i === arr.length - 1 ? 'rounded-r-lg' : ''}" onclick="toggleDay(this, ${idx})">${d}</button>`).join("")}
+            </div>
+            <button onclick="deleteInterval(${idx})" class="w-full bg-red-500 hover:bg-red-600 text-white rounded-lg py-2">Удалить интервал</button>
+          </div>
+        `;
+        container.appendChild(block);
+      });
+    }
+
+    setInterval(updateTime, 1000);
+    setInterval(fetchCooldown, 5000);
+
+    window.onload = () => {
+      updateTime();
+      fetchSchedule();
+      fetchLastActivation();
+      fetchCooldown();
+    };
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-4 sm:p-6 font-sans">
+  <div class="max-w-4xl mx-auto space-y-6">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <div class="flex-1 bg-white shadow rounded-xl p-4 text-center">
+        <div class="text-4xl font-bold" id="currentTime">--:--:--</div>
+        <div class="text-sm text-gray-500" id="currentDate">--.--.----, --</div>
+      </div>
+      <div class="bg-white shadow rounded-xl p-4 text-center min-w-[180px]">
+        <div class="text-sm text-gray-500">Последняя активация:</div>
+        <div class="text-lg" id="lastActivation">--:--</div>
+        <div class="text-sm mt-2">Кулдаун:</div>
+        <div class="text-base font-semibold" id="cooldownDisplay">-- / --</div>
+        <label class="block text-xs mt-2">Изменить:
+          <input type="number" class="mt-1 p-1 border rounded w-full text-sm" onchange="updateCooldownConfigured(parseInt(this.value))">
+        </label>
+      </div>
+      <button onclick="activateSpray()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl shadow">💨 Пшик</button>
+    </div>
+
+    <div class="bg-white rounded-2xl shadow-lg p-4 sm:p-6">
+      <h2 class="text-xl font-semibold mb-4">Интервалы</h2>
+      <div id="intervals" class="space-y-4"></div>
+      <button onclick="addInterval()" class="w-full py-2 mt-4 bg-blue-500 hover:bg-blue-600 text-white rounded-xl shadow transition">
+        ➕ Добавить интервал
+      </button>
+    </div>
+  </div>
+
+  <button id="saveBtn" onclick="saveSchedule()" class="fixed bottom-4 right-4 bg-green-500 text-white px-4 py-2 rounded-xl shadow-lg hidden z-50">
+    💾 Сохранить изменения
+  </button>
+</body>
+</html>
